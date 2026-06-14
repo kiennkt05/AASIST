@@ -4,21 +4,33 @@ import torch.nn.functional as F
 import numpy as np
 import math
 
-@torch.jit.script
 def differentiable_ema(x: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    # Fast GPU-friendly EMA using depthwise 1D Convolution
     # x: (B, C, T)
-    # s: (C, 1) - ensure s is unsqueezed to broadcast over B and T
+    # s: (1, C)
     B, C, T = x.shape
-    M = torch.zeros_like(x)
     
-    # Initialize the first frame
-    M[:, :, 0] = x[:, :, 0]
+    # K determines how far back the EMA remembers. 
+    # Since s >= 0.01, (1-0.01)^1024 is practically zero.
+    K = min(T, 1024) 
     
-    # Sequential EMA loop (JIT compiler will optimize this in C++)
-    for t in range(1, T):
-        M[:, :, t] = s * x[:, :, t] + (1.0 - s) * M[:, :, t-1]
-        
-    return M
+    # Construct exponential decay kernel: w[tau] = s * (1-s)^tau
+    k = torch.arange(K, dtype=x.dtype, device=x.device).view(1, 1, K)
+    s_view = s.view(1, C, 1)
+    
+    w = s_view * (1.0 - s_view)**k
+    
+    # Flip for cross-correlation in F.conv1d
+    w = torch.flip(w, dims=[-1]).view(C, 1, K)
+    
+    # Causal padding
+    x_padded = F.pad(x, (K - 1, 0))
+    out = F.conv1d(x_padded, w, groups=C)
+    
+    # Add initial state correction (1-s)^(t+1) * x_0 to match exact sequential EMA
+    out[:, :, :K] += ((1.0 - s_view)**(k + 1)) * x[:, :, 0:1]
+    
+    return out
 
 class sPCEN(nn.Module):
     def __init__(self, num_filters, alpha=0.96, smooth_coef=0.04, delta=2.0, root=2.0, floor=1e-6, trainable=True):
@@ -31,7 +43,8 @@ class sPCEN(nn.Module):
 
     def forward(self, x):
         # x shape: (B, C, T)
-        s = torch.clamp(self.s, min=1e-4, max=0.9999).view(1, -1)
+        # Clamp s >= 0.01 to ensure the EMA decays to zero within K=1024 steps
+        s = torch.clamp(self.s, min=0.01, max=0.99).view(1, -1)
         alpha = torch.clamp(self.alpha, min=0.0, max=1.0).view(1, -1, 1)
         root = torch.clamp(self.root, min=1.0).view(1, -1, 1)
         delta = torch.clamp(self.delta, min=0.0).view(1, -1, 1)
