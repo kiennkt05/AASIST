@@ -26,6 +26,7 @@ from data_utils import (Dataset_ASVspoof2019_train,
                         Dataset_ASVspoof2019_devNeval, genSpoof_list)
 from evaluation import calculate_tDCF_EER
 from utils import create_optimizer, seed_worker, set_seed, str_to_bool
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -111,7 +112,18 @@ def main(args: argparse.Namespace) -> None:
 
     # get optimizer and scheduler
     optim_config["steps_per_epoch"] = len(trn_loader)
-    optimizer, scheduler = create_optimizer(model.parameters(), optim_config)
+    spcen_params = []
+    base_params = []
+    for n, p in model.named_parameters():
+        if 'leaf_spcen' in n:
+            spcen_params.append(p)
+        else:
+            base_params.append(p)
+    param_groups = [
+        {"params": base_params},
+        {"params": spcen_params, "lr": 1e-4}
+    ]
+    optimizer, scheduler = create_optimizer(param_groups, optim_config)
     optimizer_swa = SWA(optimizer)
 
     best_dev_eer = 1.
@@ -143,6 +155,15 @@ def main(args: argparse.Namespace) -> None:
         writer.add_scalar("loss", running_loss, epoch)
         writer.add_scalar("dev_eer", dev_eer, epoch)
         writer.add_scalar("dev_tdcf", dev_tdcf, epoch)
+
+        if epoch == 0:
+            print("\n--- Epoch 0 Sanity Checks ---")
+            if hasattr(model, 'leaf_gabor'):
+                print("leaf_gabor.bandwidths:", model.leaf_gabor.bandwidths.data)
+                print("leaf_gabor.center_freqs:", model.leaf_gabor.center_freqs.data)
+            if hasattr(model, 'leaf_spcen'):
+                print("leaf_spcen.s:", model.leaf_spcen.s.data)
+            print("-----------------------------\n")
 
         best_dev_tdcf = min(dev_tdcf, best_dev_tdcf)
         if best_dev_eer >= dev_eer:
@@ -300,7 +321,7 @@ def produce_evaluation_file(
         trial_lines = f_trl.readlines()
     fname_list = []
     score_list = []
-    for batch_x, utt_id in data_loader:
+    for batch_x, utt_id in tqdm(data_loader, desc="Evaluating"):
         batch_x = batch_x.to(device)
         with torch.no_grad():
             _, batch_out = model(batch_x)
@@ -334,7 +355,7 @@ def train_epoch(
     # set objective (Loss) functions
     weight = torch.FloatTensor([0.1, 0.9]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weight)
-    for batch_x, batch_y in trn_loader:
+    for batch_x, batch_y in tqdm(trn_loader, desc="Training"):
         batch_size = batch_x.size(0)
         num_total += batch_size
         ii += 1
@@ -345,6 +366,7 @@ def train_epoch(
         running_loss += batch_loss.item() * batch_size
         optim.zero_grad()
         batch_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optim.step()
 
         if config["optim_config"]["scheduler"] in ["cosine", "keras_decay"]:

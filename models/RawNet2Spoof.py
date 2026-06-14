@@ -11,6 +11,7 @@ from torch.nn.parameter import Parameter
 ___author__ = "Hemlata Tak"
 __email__ = "tak@eurecom.fr"
 
+from models.leaf_frontend import GaborConv1D, sPCEN
 
 class SincConv(nn.Module):
     @staticmethod
@@ -170,13 +171,11 @@ class Model(nn.Module):
     def __init__(self, d_args):
         super().__init__()
 
-        #self.device = device
-        self.Sinc_conv = SincConv(
-            #device=self.device,
+        self.leaf_gabor = GaborConv1D(
             out_channels=d_args["filts"][0],
             kernel_size=d_args["first_conv"],
-            in_channels=d_args["in_channels"],
         )
+        self.leaf_spcen = sPCEN(num_filters=d_args["filts"][0])
 
         self.first_bn = nn.BatchNorm1d(num_features=d_args["filts"][0])
         self.selu = nn.SELU(inplace=True)
@@ -241,8 +240,9 @@ class Model(nn.Module):
         len_seq = x.shape[1]
         x = x.view(nb_samp, 1, len_seq)
 
-        x = self.Sinc_conv(x)
-        x = F.max_pool1d(torch.abs(x), 3)
+        x = self.leaf_gabor(x)
+        x = F.max_pool1d(x, 3)
+        x = self.leaf_spcen(x)
         x = self.first_bn(x)
         x = self.selu(x)
 

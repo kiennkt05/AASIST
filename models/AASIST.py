@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-
+from models.leaf_frontend import GaborConv1D, sPCEN
 
 class GraphAttentionLayer(nn.Module):
     def __init__(self, in_dim, out_dim, **kwargs):
@@ -476,9 +476,9 @@ class Model(nn.Module):
         pool_ratios = d_args["pool_ratios"]
         temperatures = d_args["temperatures"]
 
-        self.conv_time = CONV(out_channels=filts[0],
-                              kernel_size=d_args["first_conv"],
-                              in_channels=1)
+        self.leaf_gabor = GaborConv1D(out_channels=filts[0],
+                                      kernel_size=d_args["first_conv"])
+        self.leaf_spcen = sPCEN(num_filters=23)
         self.first_bn = nn.BatchNorm2d(num_features=1)
 
         self.drop = nn.Dropout(0.5, inplace=True)
@@ -528,9 +528,12 @@ class Model(nn.Module):
     def forward(self, x, Freq_aug=False):
 
         x = x.unsqueeze(1)
-        x = self.conv_time(x, mask=Freq_aug)
+        x = self.leaf_gabor(x)
         x = x.unsqueeze(dim=1)
-        x = F.max_pool2d(torch.abs(x), (3, 3))
+        x = F.max_pool2d(x, (3, 3))
+        x = x.squeeze(1)
+        x = self.leaf_spcen(x)
+        x = x.unsqueeze(1)
         x = self.first_bn(x)
         x = self.selu(x)
 
