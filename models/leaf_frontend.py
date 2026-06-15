@@ -74,15 +74,26 @@ class GaborConv1D(nn.Module):
         # Initial bandwidths
         init_bw = (filbandwidthsf[1:] - filbandwidthsf[:-1]) / self.sample_rate
 
-        self.center_freqs = nn.Parameter(torch.tensor(init_freqs, dtype=torch.float32))
-        self.bandwidths = nn.Parameter(torch.tensor(init_bw, dtype=torch.float32))
+        sigma_min = 4 * math.sqrt(2 * math.log(2)) / self.kernel_size
+        
+        # 1. Khởi tạo center_freqs bằng hàm logit (ngược của sigmoid)
+        init_freqs_tensor = torch.tensor(init_freqs, dtype=torch.float32)
+        init_freqs_scaled = torch.clamp(init_freqs_tensor / 0.5, min=1e-4, max=0.9999)
+        self.center_freqs = nn.Parameter(torch.logit(init_freqs_scaled))
+
+        # 2. Khởi tạo bandwidths bằng hàm inverse softplus
+        # inverse_softplus(y) = log(exp(y) - 1). Dùng expm1 để tối ưu sai số số học.
+        init_bw_tensor = torch.tensor(init_bw, dtype=torch.float32)
+        target_softplus_val = torch.clamp(init_bw_tensor - sigma_min, min=1e-5)
+        self.bandwidths = nn.Parameter(torch.log(torch.expm1(target_softplus_val)))
 
     def get_filters(self):
-        # Clamp to prevent divergence
-        freqs = torch.clamp(self.center_freqs, min=0.0, max=0.5)
-        # sigma min = 4*sqrt(2*ln(2)) / W
+        # 1. Ép tần số trung tâm vào khoảng [0, 0.5] mượt mà, chống Aliasing
+        freqs = 0.5 * torch.sigmoid(self.center_freqs)
+        
+        # 2. Ép băng thông luôn lớn hơn sigma_min mượt mà
         sigma_min = 4 * math.sqrt(2 * math.log(2)) / self.kernel_size
-        sigmas = torch.clamp(self.bandwidths, min=sigma_min, max=0.5)
+        sigmas = sigma_min + F.softplus(self.bandwidths)
 
         t = torch.arange(-(self.kernel_size - 1) / 2, (self.kernel_size - 1) / 2 + 1, device=freqs.device)
         t = t.view(1, -1)
