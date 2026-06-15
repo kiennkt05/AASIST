@@ -131,6 +131,41 @@ def main(args: argparse.Namespace) -> None:
     best_dev_tdcf = 0.05
     best_eval_tdcf = 1.
     n_swa_update = 0  # number of snapshots of model to use in SWA
+    start_epoch = 0
+
+    if args.resume is not None:
+        if os.path.exists(args.resume):
+            print("Loading checkpoint from {}...".format(args.resume))
+            checkpoint = torch.load(args.resume, map_location=device)
+            if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                model.load_state_dict(checkpoint["model_state_dict"])
+                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                if "optimizer_swa_state_dict" in checkpoint:
+                    optimizer_swa.load_state_dict(checkpoint["optimizer_swa_state_dict"])
+                # Move optimizer state tensors to device
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            state[k] = v.to(device)
+                for state in optimizer_swa.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            state[k] = v.to(device)
+                if scheduler is not None and "scheduler_state_dict" in checkpoint:
+                    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                start_epoch = checkpoint["epoch"] + 1
+                best_dev_eer = checkpoint.get("best_dev_eer", 1.0)
+                best_dev_tdcf = checkpoint.get("best_dev_tdcf", 0.05)
+                best_eval_eer = checkpoint.get("best_eval_eer", 100.0)
+                best_eval_tdcf = checkpoint.get("best_eval_tdcf", 1.0)
+                n_swa_update = checkpoint.get("n_swa_update", 0)
+                print("Resumed training from epoch {}".format(start_epoch))
+            else:
+                model.load_state_dict(checkpoint)
+                print("Loaded model weights checkpoint. Starting from epoch 0.")
+        else:
+            print("Checkpoint path {} does not exist. Starting from scratch.".format(args.resume))
+
     f_log = open(model_tag / "metric_log.txt", "a")
     f_log.write("=" * 5 + "\n")
 
@@ -139,7 +174,8 @@ def main(args: argparse.Namespace) -> None:
     os.makedirs(metric_path, exist_ok=True)
 
     # Training
-    for epoch in range(config["num_epochs"]):
+    epoch = start_epoch
+    for epoch in range(start_epoch, config["num_epochs"]):
         print("Start training epoch{:03d}".format(epoch))
         running_loss = train_epoch(trn_loader, model, optimizer, device,
                                    scheduler, config)
@@ -200,6 +236,21 @@ def main(args: argparse.Namespace) -> None:
             n_swa_update += 1
         writer.add_scalar("best_dev_eer", best_dev_eer, epoch)
         writer.add_scalar("best_dev_tdcf", best_dev_tdcf, epoch)
+
+        # Save checkpoint for resume
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "optimizer_swa_state_dict": optimizer_swa.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+            "best_dev_eer": best_dev_eer,
+            "best_dev_tdcf": best_dev_tdcf,
+            "best_eval_eer": best_eval_eer,
+            "best_eval_tdcf": best_eval_tdcf,
+            "n_swa_update": n_swa_update,
+        }
+        torch.save(checkpoint, model_save_path / "checkpoint_latest.pth")
 
     print("Start final evaluation")
     epoch += 1
@@ -410,4 +461,8 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="directory to the model weight file (can be also given in the config file)")
+    parser.add_argument("--resume",
+                        type=str,
+                        default=None,
+                        help="path to checkpoint to resume training from")
     main(parser.parse_args())
