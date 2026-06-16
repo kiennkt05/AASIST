@@ -88,12 +88,23 @@ class GaborConv1D(nn.Module):
         self.bandwidths = nn.Parameter(torch.log(torch.expm1(target_softplus_val)))
 
     def get_filters(self):
-        # 1. Ép tần số trung tâm vào khoảng [0, 0.5] mượt mà, chống Aliasing
-        freqs = 0.5 * torch.sigmoid(self.center_freqs)
+        # 1. Ép tần số trung tâm vào khoảng [0, 0.5]
+        # BẮT BUỘC dùng clamp thay vì sigmoid để bảo toàn giá trị khởi tạo Mel-scale (0.003 -> 0.4)
+        freqs = torch.clamp(self.center_freqs, min=0.0, max=0.5)
         
-        # 2. Ép băng thông luôn lớn hơn sigma_min mượt mà
-        sigma_min = 4 * math.sqrt(2 * math.log(2)) / self.kernel_size
-        sigmas = sigma_min + F.softplus(self.bandwidths)
+        # 2. Băng thông tần số B_norm.
+        # BẮT BUỘC dùng clamp thay vì softplus để bảo toàn giá trị khởi tạo ban đầu.
+        B_norm = torch.clamp(self.bandwidths, min=1e-4, max=0.5)
+        
+        # 3. CHỮA LỖI CHÍ MẠNG CỦA AASIST: Băng thông tần số (B_norm) tỷ lệ nghịch với 
+        # độ lệch chuẩn thời gian (sigma_t) theo công thức sigma_t = 1 / (2*pi*B_norm).
+        # Tác giả AASIST đã nhầm lẫn dùng B_norm trực tiếp làm sigma_t, khiến sigma_t = 0.003,
+        # tạo ra Delta function thay vì Gabor filter!
+        sigmas = 1.0 / (2.0 * math.pi * B_norm)
+        
+        # Đảm bảo sigma_t >= 2.0 (filter không bị co lại thành 1 sample)
+        # và không quá rộng (sigma_t <= kernel_size / 2)
+        sigmas = torch.clamp(sigmas, min=2.0, max=self.kernel_size / 2.0)
 
         t = torch.arange(-(self.kernel_size - 1) / 2, (self.kernel_size - 1) / 2 + 1, device=freqs.device)
         t = t.view(1, -1)

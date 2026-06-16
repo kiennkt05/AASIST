@@ -18,6 +18,7 @@ from typing import Dict, List, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchcontrib.optim import SWA
@@ -428,7 +429,8 @@ def train_epoch(
                 has_nan = torch.isnan(feature_map).any().item()
                 print(f"\n[Sanity] Lỗi NaN trong Feature Map: {has_nan}")
                 
-                feat_fft = torch.abs(torch.fft.rfft(feature_map[0, 0, :]))
+                # Loại bỏ thành phần DC (DC offset) sinh ra bởi hàm abs() trước khi tính FFT
+                feat_fft = torch.abs(torch.fft.rfft(feature_map[0, 0, :] - feature_map[0, 0, :].mean()))
                 peak_freq_idx = torch.argmax(feat_fft).item()
                 
                 print(f"[Sanity] Vị trí đỉnh phổ của Feature Map (Peak Freq Index): {peak_freq_idx}")
