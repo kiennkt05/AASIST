@@ -478,7 +478,11 @@ class Model(nn.Module):
 
         self.leaf_gabor = GaborConv1D(out_channels=filts[0],
                                       kernel_size=d_args["first_conv"])
-        self.leaf_spcen = sPCEN(num_filters=23)
+        self.leaf_spcen = sPCEN(num_filters=filts[0] * 2)
+
+        self.proj_real = nn.Parameter(torch.ones(1, filts[0], 1) * 0.5)
+        self.proj_imag = nn.Parameter(torch.ones(1, filts[0], 1) * 0.5)
+
         self.first_bn = nn.BatchNorm2d(num_features=1)
 
         self.drop = nn.Dropout(0.5, inplace=True)
@@ -529,11 +533,17 @@ class Model(nn.Module):
 
         x = x.unsqueeze(1)
         x = self.leaf_gabor(x)
-        x = x.unsqueeze(dim=1)
-        x = F.max_pool2d(x, (3, 3))
-        x = x.squeeze(1)
+        x = torch.abs(x)
+
+        x = F.max_pool1d(x, 3)
         x = self.leaf_spcen(x)
+
+        x_real, x_imag = torch.chunk(x, 2, dim=1)
+        x = (x_real * self.proj_real) + (x_imag * self.proj_imag)
+
         x = x.unsqueeze(1)
+        x = F.max_pool2d(x, (3, 1))
+        
         x = self.first_bn(x)
         x = self.selu(x)
 

@@ -115,4 +115,5 @@ class GaborConv1D(nn.Module):
         filters = self.get_filters()
         out = F.conv1d(x, filters, stride=1, padding=self.kernel_size//2)
         out_real, out_imag = torch.chunk(out, 2, dim=1)
-        return out_real**2 + out_imag**2 # Squared modulus
+        out_complex = torch.cat([out_real, out_imag], dim=1)
+        return out_complex

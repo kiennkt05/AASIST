@@ -2,7 +2,7 @@
 _*
 .*
 exp_result/
-config/
+# config/
 # models/
 depreciated/
 LA/

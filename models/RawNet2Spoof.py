@@ -175,7 +175,10 @@ class Model(nn.Module):
             out_channels=d_args["filts"][0],
             kernel_size=d_args["first_conv"],
         )
-        self.leaf_spcen = sPCEN(num_filters=d_args["filts"][0])
+        self.leaf_spcen = sPCEN(num_filters=d_args["filts"][0] * 2)
+
+        self.proj_real = nn.Parameter(torch.ones(1, d_args["filts"][0], 1) * 0.5)
+        self.proj_imag = nn.Parameter(torch.ones(1, d_args["filts"][0], 1) * 0.5)
 
         self.first_bn = nn.BatchNorm1d(num_features=d_args["filts"][0])
         self.selu = nn.SELU(inplace=True)
@@ -241,8 +244,13 @@ class Model(nn.Module):
         x = x.view(nb_samp, 1, len_seq)
 
         x = self.leaf_gabor(x)
+        x = torch.abs(x)
         x = F.max_pool1d(x, 3)
         x = self.leaf_spcen(x)
+        
+        x_real, x_imag = torch.chunk(x, 2, dim=1)
+        x = (x_real * self.proj_real) + (x_imag * self.proj_imag)
+        
         x = self.first_bn(x)
         x = self.selu(x)
 
