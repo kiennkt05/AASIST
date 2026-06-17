@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
+
+from utils import str_to_bool
 from torch.utils import data
 from torch.nn.parameter import Parameter
 
@@ -206,8 +208,8 @@ class Model(nn.Module):
     def __init__(self, d_args):
         super().__init__()
 
-        use_gabor = d_args.get("use_gabor", True)
-        use_spcen = d_args.get("use_spcen", True)
+        use_gabor = str_to_bool(str(d_args.get("use_gabor", "True")))
+        use_spcen = str_to_bool(str(d_args.get("use_spcen", "True")))
 
         self.frontend = DynamicFrontend(
             filts=d_args["filts"][0],

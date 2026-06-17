@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+
+from utils import str_to_bool
 from models.leaf_frontend import GaborConv1D, sPCEN
 
 class GraphAttentionLayer(nn.Module):
@@ -511,8 +513,8 @@ class Model(nn.Module):
         pool_ratios = d_args["pool_ratios"]
         temperatures = d_args["temperatures"]
 
-        use_gabor = d_args.get("use_gabor", True)
-        use_spcen = d_args.get("use_spcen", True)
+        use_gabor = str_to_bool(str(d_args.get("use_gabor", "True")))
+        use_spcen = str_to_bool(str(d_args.get("use_spcen", "True")))
 
         self.frontend = DynamicFrontend(
             filts=filts[0],

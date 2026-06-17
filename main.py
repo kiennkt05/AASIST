@@ -419,12 +419,12 @@ def train_epoch(
             with torch.no_grad():
                 # Tự chạy lại một phần forward pass để lấy feature map
                 if hasattr(model, 'first_bn') and isinstance(model.first_bn, nn.BatchNorm2d):
-                    x_gab = model.leaf_gabor(batch_x.unsqueeze(1))
+                    x_gab = model.frontend.filterbank(batch_x.unsqueeze(1))
                 else:
-                    x_gab = model.leaf_gabor(batch_x.view(batch_size, 1, -1))
+                    x_gab = model.frontend.filterbank(batch_x.view(batch_size, 1, -1))
                 x_abs = torch.abs(x_gab)
                 x_pool = F.max_pool1d(x_abs, 3)
-                feature_map = model.leaf_spcen(x_pool)
+                feature_map = model.frontend.spcen(x_pool)
                 
                 has_nan = torch.isnan(feature_map).any().item()
                 print(f"\n[Sanity] Lỗi NaN trong Feature Map: {has_nan}")
@@ -446,9 +446,9 @@ def train_epoch(
         
         if ii == 1:
             with torch.no_grad():
-                if hasattr(model, 'proj_real') and model.proj_real.grad is not None:
-                    grad_real = torch.norm(model.proj_real.grad).item()
-                    grad_imag = torch.norm(model.proj_imag.grad).item()
+                if hasattr(model.frontend, 'proj_real') and model.frontend.proj_real.grad is not None:
+                    grad_real = torch.norm(model.frontend.proj_real.grad).item()
+                    grad_imag = torch.norm(model.frontend.proj_imag.grad).item()
                     
                     print(f"[Sanity] Gradient Norm (Lớp chiếu): Real = {grad_real:.4f} | Imag = {grad_imag:.4f}")
                     
