@@ -89,12 +89,11 @@ class GaborConv1D(nn.Module):
 
     def get_filters(self):
         # 1. Ép tần số trung tâm vào khoảng [0, 0.5]
-        # BẮT BUỘC dùng clamp thay vì sigmoid để bảo toàn giá trị khởi tạo Mel-scale (0.003 -> 0.4)
-        freqs = torch.clamp(self.center_freqs, min=0.0, max=0.5)
+        freqs = 0.5 * torch.sigmoid(self.center_freqs)
         
         # 2. Băng thông tần số B_norm.
-        # BẮT BUỘC dùng clamp thay vì softplus để bảo toàn giá trị khởi tạo ban đầu.
-        B_norm = torch.clamp(self.bandwidths, min=1e-4, max=0.5)
+        sigma_min = 4.0 * math.sqrt(2.0 * math.log(2.0)) / self.kernel_size
+        B_norm = F.softplus(self.bandwidths) + sigma_min
         
         # 3. CHỮA LỖI CHÍ MẠNG CỦA AASIST: Băng thông tần số (B_norm) tỷ lệ nghịch với 
         # độ lệch chuẩn thời gian (sigma_t) theo công thức sigma_t = 1 / (2*pi*B_norm).

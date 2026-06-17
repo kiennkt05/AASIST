@@ -497,7 +497,7 @@ class Model(nn.Module):
             nn.Sequential(Residual_block(nb_filts=filts[4])),
             nn.Sequential(Residual_block(nb_filts=filts[4])))
 
-        self.pos_S = nn.Parameter(torch.randn(1, 23, filts[-1][-1]))
+        self.pos_S = nn.Parameter(torch.randn(1, filts[0] // 3, filts[-1][-1]))
         self.master1 = nn.Parameter(torch.randn(1, 1, gat_dims[0]))
         self.master2 = nn.Parameter(torch.randn(1, 1, gat_dims[0]))
 
