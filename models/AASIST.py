@@ -466,6 +466,41 @@ class Residual_block(nn.Module):
         return out
 
 
+class DynamicFrontend(nn.Module):
+    def __init__(self, filts, first_conv, use_gabor=True, use_spcen=True):
+        super().__init__()
+        self.use_gabor = use_gabor
+        self.use_spcen = use_spcen
+        
+        if use_gabor:
+            self.filterbank = GaborConv1D(out_channels=filts, kernel_size=first_conv)
+            self.proj_real = nn.Parameter(torch.ones(1, filts, 1) * 0.5)
+            self.proj_imag = nn.Parameter(torch.ones(1, filts, 1) * 0.5)
+            spcen_channels = filts * 2
+        else:
+            self.filterbank = CONV(out_channels=filts, kernel_size=first_conv)
+            spcen_channels = filts
+            
+        if use_spcen:
+            self.spcen = sPCEN(num_filters=spcen_channels)
+        else:
+            self.spcen = nn.Identity()
+
+    def forward(self, x):
+        x = self.filterbank(x)
+        x = torch.abs(x)
+        
+        x = F.max_pool1d(x, 3)
+        
+        x = self.spcen(x)
+        
+        if self.use_gabor:
+            x_real, x_imag = torch.chunk(x, 2, dim=1)
+            x = (x_real * self.proj_real) + (x_imag * self.proj_imag)
+            
+        return x
+
+
 class Model(nn.Module):
     def __init__(self, d_args):
         super().__init__()
@@ -476,12 +511,15 @@ class Model(nn.Module):
         pool_ratios = d_args["pool_ratios"]
         temperatures = d_args["temperatures"]
 
-        self.leaf_gabor = GaborConv1D(out_channels=filts[0],
-                                      kernel_size=d_args["first_conv"])
-        self.leaf_spcen = sPCEN(num_filters=filts[0] * 2)
+        use_gabor = d_args.get("use_gabor", True)
+        use_spcen = d_args.get("use_spcen", True)
 
-        self.proj_real = nn.Parameter(torch.ones(1, filts[0], 1) * 0.5)
-        self.proj_imag = nn.Parameter(torch.ones(1, filts[0], 1) * 0.5)
+        self.frontend = DynamicFrontend(
+            filts=filts[0],
+            first_conv=d_args["first_conv"],
+            use_gabor=use_gabor,
+            use_spcen=use_spcen
+        )
 
         self.first_bn = nn.BatchNorm2d(num_features=1)
 
@@ -532,14 +570,7 @@ class Model(nn.Module):
     def forward(self, x, Freq_aug=False):
 
         x = x.unsqueeze(1)
-        x = self.leaf_gabor(x)
-        x = torch.abs(x)
-
-        x = F.max_pool1d(x, 3)
-        x = self.leaf_spcen(x)
-
-        x_real, x_imag = torch.chunk(x, 2, dim=1)
-        x = (x_real * self.proj_real) + (x_imag * self.proj_imag)
+        x = self.frontend(x)
 
         x = x.unsqueeze(1)
         x = F.max_pool2d(x, (3, 1))
