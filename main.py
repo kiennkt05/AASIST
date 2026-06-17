@@ -194,13 +194,15 @@ def main(args: argparse.Namespace) -> None:
         writer.add_scalar("dev_tdcf", dev_tdcf, epoch)
 
         if epoch == 0:
-            print("\n--- Epoch 0 Sanity Checks ---")
-            if hasattr(model, 'leaf_gabor'):
-                print("leaf_gabor.bandwidths:", model.leaf_gabor.bandwidths.data)
-                print("leaf_gabor.center_freqs:", model.leaf_gabor.center_freqs.data)
-            if hasattr(model, 'leaf_spcen'):
-                print("leaf_spcen.s:", model.leaf_spcen.s.data)
-            print("-----------------------------\n")
+            if hasattr(model.frontend, 'use_gabor') and model.frontend.use_gabor:
+                print("\n--- Epoch 0: Gabor Filter Sanity Checks ---")
+                print("leaf_gabor.bandwidths:", model.frontend.filterbank.bandwidths.data)
+                print("leaf_gabor.center_freqs:", model.frontend.filterbank.center_freqs.data)
+                print("-----------------------------\n")
+            if hasattr(model.frontend, 'use_spcen') and model.frontend.use_spcen:
+                print("\n--- Epoch 0: S-PCEN Sanity Checks ---")
+                print("leaf_spcen.s:", model.frontend.spcen.s.data)
+                print("-----------------------------\n")
 
         best_dev_tdcf = min(dev_tdcf, best_dev_tdcf)
         if best_dev_eer >= dev_eer:
@@ -415,7 +417,7 @@ def train_epoch(
         batch_y = batch_y.view(-1).type(torch.int64).to(device)
         _, batch_out = model(batch_x, Freq_aug=str_to_bool(config["freq_aug"]))
         
-        if ii == 1:
+        if ii == 1 and hasattr(model.frontend, 'use_gabor') and model.frontend.use_gabor:
             with torch.no_grad():
                 # Tự chạy lại một phần forward pass để lấy feature map
                 if hasattr(model, 'first_bn') and isinstance(model.first_bn, nn.BatchNorm2d):
@@ -444,7 +446,7 @@ def train_epoch(
         optim.zero_grad()
         batch_loss.backward()
         
-        if ii == 1:
+        if ii == 1 and hasattr(model.frontend, 'use_gabor') and model.frontend.use_gabor:
             with torch.no_grad():
                 if hasattr(model.frontend, 'proj_real') and model.frontend.proj_real.grad is not None:
                     grad_real = torch.norm(model.frontend.proj_real.grad).item()
