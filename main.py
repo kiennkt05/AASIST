@@ -416,50 +416,11 @@ def train_epoch(
         batch_x = batch_x.to(device)
         batch_y = batch_y.view(-1).type(torch.int64).to(device)
         _, batch_out = model(batch_x, Freq_aug=str_to_bool(config["freq_aug"]))
-        
-        if ii == 1 and hasattr(model.frontend, 'use_gabor') and model.frontend.use_gabor:
-            with torch.no_grad():
-                # Tự chạy lại một phần forward pass để lấy feature map
-                if hasattr(model, 'first_bn') and isinstance(model.first_bn, nn.BatchNorm2d):
-                    x_gab = model.frontend.filterbank(batch_x.unsqueeze(1))
-                else:
-                    x_gab = model.frontend.filterbank(batch_x.view(batch_size, 1, -1))
-                x_abs = torch.abs(x_gab)
-                x_pool = F.max_pool1d(x_abs, 3)
-                feature_map = model.frontend.spcen(x_pool)
-                
-                has_nan = torch.isnan(feature_map).any().item()
-                print(f"\n[Sanity] Lỗi NaN trong Feature Map: {has_nan}")
-                
-                # Loại bỏ thành phần DC (DC offset) sinh ra bởi hàm abs() trước khi tính FFT
-                feat_fft = torch.abs(torch.fft.rfft(feature_map[0, 0, :] - feature_map[0, 0, :].mean()))
-                peak_freq_idx = torch.argmax(feat_fft).item()
-                
-                print(f"[Sanity] Vị trí đỉnh phổ của Feature Map (Peak Freq Index): {peak_freq_idx}")
-                if peak_freq_idx <= 2:
-                    print("  -> CẢNH BÁO: Tín hiệu vẫn bị dồn về Baseband (0 Hz)!")
-                else:
-                    print("  -> TUYỆT VỜI: Sóng mang (Carrier Frequency) đã được bảo tồn!")
 
         batch_loss = criterion(batch_out, batch_y)
         running_loss += batch_loss.item() * batch_size
         optim.zero_grad()
         batch_loss.backward()
-        
-        if ii == 1 and hasattr(model.frontend, 'use_gabor') and model.frontend.use_gabor:
-            with torch.no_grad():
-                if hasattr(model.frontend, 'proj_real') and model.frontend.proj_real.grad is not None:
-                    grad_real = torch.norm(model.frontend.proj_real.grad).item()
-                    grad_imag = torch.norm(model.frontend.proj_imag.grad).item()
-                    
-                    print(f"[Sanity] Gradient Norm (Lớp chiếu): Real = {grad_real:.4f} | Imag = {grad_imag:.4f}")
-                    
-                    if grad_real > 0 and grad_imag > 0:
-                        ratio = max(grad_real, grad_imag) / (min(grad_real, grad_imag) + 1e-8)
-                        if ratio > 10:
-                            print("  -> CHÚ Ý: Mạng đang thiên vị quá mức một nửa (Real hoặc Imag).")
-                        else:
-                            print("  -> OK: Mạng đang học cân bằng từ cả Real và Imag (Phase-aware).")
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optim.step()
