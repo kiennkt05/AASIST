@@ -126,6 +126,17 @@ def main(args: argparse.Namespace) -> None:
     ]
     optimizer, scheduler = create_optimizer(param_groups, optim_config)
     optimizer_swa = SWA(optimizer)
+    
+    # Fix for torchcontrib SWA in PyTorch 2.0+
+    for hook_name in [
+        '_optimizer_step_pre_hooks', '_optimizer_step_post_hooks',
+        '_optimizer_state_dict_pre_hooks', '_optimizer_state_dict_post_hooks',
+        '_optimizer_load_state_dict_pre_hooks', '_optimizer_load_state_dict_post_hooks'
+    ]:
+        if not hasattr(optimizer_swa, hook_name):
+            setattr(optimizer_swa, hook_name, {})
+    if not hasattr(optimizer_swa, 'defaults'):
+        optimizer_swa.defaults = optimizer.defaults
 
     best_dev_eer = 1.
     best_eval_eer = 100.
