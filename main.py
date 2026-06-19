@@ -9,13 +9,15 @@ MIT license
 import argparse
 import json
 import os
+import random
 import sys
 import warnings
 from importlib import import_module
 from pathlib import Path
 from shutil import copy
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,6 +33,78 @@ from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+
+# -----------------------------------------------------------------------------
+# Reproducibility helpers
+# -----------------------------------------------------------------------------
+
+def enable_full_determinism() -> None:
+    """Best-effort deterministic setup for CUDA/PyTorch."""
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    # TF32 can slightly change numerical results across runs / devices.
+    if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "matmul"):
+        torch.backends.cuda.matmul.allow_tf32 = False
+    if hasattr(torch.backends, "cudnn") and hasattr(torch.backends.cudnn, "allow_tf32"):
+        torch.backends.cudnn.allow_tf32 = False
+
+    try:
+        torch.use_deterministic_algorithms(True)
+    except Exception:
+        # Some older builds / environments may not support this.
+        pass
+
+
+def capture_rng_state(train_generator: Optional[torch.Generator] = None) -> Dict[str, Any]:
+    """Capture all RNG states needed for epoch-boundary resume."""
+    state: Dict[str, Any] = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch_cpu": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda_all"] = torch.cuda.get_rng_state_all()
+    if train_generator is not None:
+        state["train_generator"] = train_generator.get_state()
+    return state
+
+
+def restore_rng_state(state: Dict[str, Any],
+                      train_generator: Optional[torch.Generator] = None) -> None:
+    """Restore all RNG states saved by capture_rng_state()."""
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch_cpu"])
+    if torch.cuda.is_available() and "torch_cuda_all" in state:
+        torch.cuda.set_rng_state_all(state["torch_cuda_all"])
+    if train_generator is not None and "train_generator" in state:
+        train_generator.set_state(state["train_generator"])
+
+
+def move_optimizer_state_to_device(optimizer: torch.optim.Optimizer,
+                                   device: torch.device) -> None:
+    """Move optimizer state tensors onto the target device."""
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to(device)
+
+
+def torch_load_compat(path: Union[str, Path], map_location: str) -> Any:
+    """Load checkpoints across PyTorch versions safely."""
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
 
 def main(args: argparse.Namespace) -> None:
     """
@@ -52,6 +126,7 @@ def main(args: argparse.Namespace) -> None:
 
     # make experiment reproducible
     set_seed(args.seed, config)
+    enable_full_determinism()
 
     # define database related paths
     output_dir = Path(args.output_dir)
@@ -88,15 +163,19 @@ def main(args: argparse.Namespace) -> None:
     # define model architecture
     model = get_model(model_config, device)
 
-    # define dataloaders
+    # Persistent generator for train DataLoader shuffle state.
+    train_generator = torch.Generator()
+    train_generator.manual_seed(args.seed)
+
+    # Define dataloaders.
     trn_loader, dev_loader, eval_loader = get_loader(
-        database_path, args.seed, config)
+        database_path, args.seed, config, train_generator
+    )
 
     # evaluates pretrained model and exit script
     if args.eval:
         model_path = args.eval_model_weights if args.eval_model_weights is not None else config["model_path"]
-        model.load_state_dict(
-            torch.load(model_path, map_location=device))
+        model.load_state_dict(torch_load_compat(model_path, map_location=device))
         print("Model loaded : {}".format(model_path))
         print("Start evaluation...")
         produce_evaluation_file(eval_loader, model, device,
@@ -149,30 +228,30 @@ def main(args: argparse.Namespace) -> None:
     if args.resume is not None:
         if os.path.exists(args.resume):
             print("Loading checkpoint from {}...".format(args.resume))
-            checkpoint = torch.load(args.resume, map_location=device)
+            checkpoint = torch_load_compat(args.resume, map_location=device)
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 model.load_state_dict(checkpoint["model_state_dict"])
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                move_optimizer_state_to_device(optimizer, device)
+
                 if "optimizer_swa_state_dict" in checkpoint:
                     optimizer_swa.load_state_dict(checkpoint["optimizer_swa_state_dict"])
-                # Move optimizer state tensors to device
-                for state in optimizer.state.values():
-                    for k, v in state.items():
-                        if isinstance(v, torch.Tensor):
-                            state[k] = v.to(device)
-                for state in optimizer_swa.state.values():
-                    for k, v in state.items():
-                        if isinstance(v, torch.Tensor):
-                            state[k] = v.to(device)
-                if scheduler is not None and "scheduler_state_dict" in checkpoint:
+                    move_optimizer_state_to_device(optimizer_swa, device)
+
+                if scheduler is not None and checkpoint.get("scheduler_state_dict") is not None:
                     scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
                 start_epoch = checkpoint["epoch"] + 1
                 best_dev_eer = checkpoint.get("best_dev_eer", 1.0)
                 best_dev_tdcf = checkpoint.get("best_dev_tdcf", 0.05)
                 best_eval_eer = checkpoint.get("best_eval_eer", 100.0)
                 best_eval_tdcf = checkpoint.get("best_eval_tdcf", 1.0)
                 n_swa_update = checkpoint.get("n_swa_update", 0)
-                print("Resumed training from epoch {}".format(start_epoch))
+
+                if "rng_state" in checkpoint:
+                    restore_rng_state(checkpoint["rng_state"], train_generator)
+
+                print(f"Resumed training from epoch {start_epoch}")
             else:
                 model.load_state_dict(checkpoint)
                 print("Loaded model weights checkpoint. Starting from epoch 0.")
@@ -186,12 +265,12 @@ def main(args: argparse.Namespace) -> None:
     metric_path = model_tag / "metrics"
     os.makedirs(metric_path, exist_ok=True)
 
-    # Training
-    epoch = start_epoch
+    # Training loop.
     for epoch in range(start_epoch, config["num_epochs"]):
         print("Start training epoch{:03d}".format(epoch))
         running_loss = train_epoch(trn_loader, model, optimizer, device,
                                    scheduler, config)
+
         produce_evaluation_file(dev_loader, model, device,
                                 metric_path/"dev_score.txt", dev_trial_path)
         dev_eer, dev_tdcf = calculate_tDCF_EER(
@@ -199,6 +278,7 @@ def main(args: argparse.Namespace) -> None:
             asv_score_file=database_path/config["asv_score_path"],
             output_file=metric_path/"dev_t-DCF_EER_{}epo.txt".format(epoch),
             printout=False)
+
         print("DONE.\nLoss:{:.5f}, dev_eer: {:.3f}, dev_tdcf:{:.5f}".format(
             running_loss, dev_eer, dev_tdcf))
         writer.add_scalar("loss", running_loss, epoch)
@@ -206,12 +286,12 @@ def main(args: argparse.Namespace) -> None:
         writer.add_scalar("dev_tdcf", dev_tdcf, epoch)
 
         if epoch == 0:
-            if hasattr(model.frontend, 'use_gabor') and model.frontend.use_gabor:
+            if hasattr(model, "frontend") and hasattr(model.frontend, "use_gabor") and model.frontend.use_gabor:
                 print("\n--- Epoch 0: Gabor Filter Sanity Checks ---")
                 print("leaf_gabor.bandwidths:", model.frontend.filterbank.bandwidths.data)
                 print("leaf_gabor.center_freqs:", model.frontend.filterbank.center_freqs.data)
                 print("-----------------------------\n")
-            if hasattr(model.frontend, 'use_spcen') and model.frontend.use_spcen:
+            if hasattr(model, "frontend") and hasattr(model.frontend, "use_spcen") and model.frontend.use_spcen:
                 print("\n--- Epoch 0: S-PCEN Sanity Checks ---")
                 print("leaf_spcen.s:", model.frontend.spcen.s.data)
                 print("-----------------------------\n")
@@ -249,6 +329,7 @@ def main(args: argparse.Namespace) -> None:
             print("Saving epoch {} for swa".format(epoch))
             optimizer_swa.update_swa()
             n_swa_update += 1
+
         writer.add_scalar("best_dev_eer", best_dev_eer, epoch)
         writer.add_scalar("best_dev_tdcf", best_dev_tdcf, epoch)
 
@@ -264,37 +345,42 @@ def main(args: argparse.Namespace) -> None:
             "best_eval_eer": best_eval_eer,
             "best_eval_tdcf": best_eval_tdcf,
             "n_swa_update": n_swa_update,
+            "rng_state": capture_rng_state(train_generator),
         }
         torch.save(checkpoint, model_save_path / "checkpoint_latest.pth")
 
+    # Final evaluation.
     print("Start final evaluation")
-    epoch += 1
     if n_swa_update > 0:
         optimizer_swa.swap_swa_sgd()
         optimizer_swa.bn_update(trn_loader, model, device=device)
+
     produce_evaluation_file(eval_loader, model, device, eval_score_path,
                             eval_trial_path)
     eval_eer, eval_tdcf = calculate_tDCF_EER(cm_scores_file=eval_score_path,
                                              asv_score_file=database_path /
                                              config["asv_score_path"],
                                              output_file=model_tag / "t-DCF_EER.txt")
-    f_log = open(model_tag / "metric_log.txt", "a")
+
     f_log.write("=" * 5 + "\n")
     f_log.write("EER: {:.3f}, min t-DCF: {:.5f}".format(eval_eer, eval_tdcf))
     f_log.close()
 
-    torch.save(model.state_dict(),
-               model_save_path / "swa.pth")
+    torch.save(model.state_dict(), model_save_path / "swa.pth")
 
     if eval_eer <= best_eval_eer:
         best_eval_eer = eval_eer
     if eval_tdcf <= best_eval_tdcf:
         best_eval_tdcf = eval_tdcf
-        torch.save(model.state_dict(),
-                   model_save_path / "best.pth")
+        torch.save(model.state_dict(), model_save_path / "best.pth")
+
     print("Exp FIN. EER: {:.3f}, min t-DCF: {:.5f}".format(
         best_eval_eer, best_eval_tdcf))
 
+
+# -----------------------------------------------------------------------------
+# Model / loader utilities
+# -----------------------------------------------------------------------------
 
 def get_model(model_config: Dict, device: torch.device):
     """Define DNN model architecture"""
@@ -307,17 +393,17 @@ def get_model(model_config: Dict, device: torch.device):
     return model
 
 
-def get_loader(
-        database_path: str,
-        seed: int,
-        config: dict) -> List[torch.utils.data.DataLoader]:
-    """Make PyTorch DataLoaders for train / developement / evaluation"""
+def get_loader(database_path: str,
+               seed: int,
+               config: dict,
+               train_generator: torch.Generator) -> List[torch.utils.data.DataLoader]:
+    """Make PyTorch DataLoaders for train / development / evaluation."""
     track = config["track"]
     prefix_2019 = "ASVspoof2019.{}".format(track)
 
-    trn_database_path = database_path / "ASVspoof2019_{}_train/".format(track)
-    dev_database_path = database_path / "ASVspoof2019_{}_dev/".format(track)
-    eval_database_path = database_path / "ASVspoof2019_{}_eval/".format(track)
+    trn_database_path = database_path / f"ASVspoof2019_{track}_train/"
+    dev_database_path = database_path / f"ASVspoof2019_{track}_dev/"
+    eval_database_path = database_path / f"ASVspoof2019_{track}_eval/"
 
     trn_list_path = (database_path /
                      "ASVspoof2019_{}_cm_protocols/{}.cm.train.trn.txt".format(
@@ -327,8 +413,8 @@ def get_loader(
                           track, prefix_2019))
     eval_trial_path = (
         database_path /
-        "ASVspoof2019_{}_cm_protocols/{}.cm.eval.trl.txt".format(
-            track, prefix_2019))
+        f"ASVspoof2019_{track}_cm_protocols/{prefix_2019}.cm.eval.trl.txt"
+    )
 
     d_label_trn, file_train = genSpoof_list(dir_meta=trn_list_path,
                                             is_train=True,
@@ -338,15 +424,15 @@ def get_loader(
     train_set = Dataset_ASVspoof2019_train(list_IDs=file_train,
                                            labels=d_label_trn,
                                            base_dir=trn_database_path)
-    gen = torch.Generator()
-    gen.manual_seed(seed)
-    trn_loader = DataLoader(train_set,
-                            batch_size=config["batch_size"],
-                            shuffle=True,
-                            drop_last=True,
-                            pin_memory=True,
-                            worker_init_fn=seed_worker,
-                            generator=gen)
+    trn_loader = DataLoader(
+        train_set,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        drop_last=True,
+        pin_memory=True,
+        worker_init_fn=seed_worker,
+        generator=train_generator,
+    )
 
     _, file_dev = genSpoof_list(dir_meta=dev_trial_path,
                                 is_train=False,
@@ -401,8 +487,8 @@ def produce_evaluation_file(
         for fn, sco, trl in zip(fname_list, score_list, trial_lines):
             _, utt_id, _, src, key = trl.strip().split(' ')
             assert fn == utt_id
-            fh.write("{} {} {} {}\n".format(utt_id, src, key, sco))
-    print("Scores saved to {}".format(save_path))
+            fh.write(f"{utt_id} {src} {key} {sco}\n")
+    print(f"Scores saved to {save_path}")
 
 
 def train_epoch(
@@ -415,7 +501,6 @@ def train_epoch(
     """Train the model for one epoch"""
     running_loss = 0
     num_total = 0.0
-    ii = 0
     model.train()
 
     # set objective (Loss) functions
@@ -424,7 +509,6 @@ def train_epoch(
     for batch_x, batch_y in tqdm(trn_loader, desc="Training"):
         batch_size = batch_x.size(0)
         num_total += batch_size
-        ii += 1
         batch_x = batch_x.to(device)
         batch_y = batch_y.view(-1).type(torch.int64).to(device)
         _, batch_out = model(batch_x, Freq_aug=str_to_bool(config["freq_aug"]))
@@ -433,7 +517,6 @@ def train_epoch(
         running_loss += batch_loss.item() * batch_size
         optim.zero_grad()
         batch_loss.backward()
-
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optim.step()
 
