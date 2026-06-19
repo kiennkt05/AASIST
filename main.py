@@ -94,9 +94,10 @@ def main(args: argparse.Namespace) -> None:
 
     # evaluates pretrained model and exit script
     if args.eval:
+        model_path = args.eval_model_weights if args.eval_model_weights is not None else config["model_path"]
         model.load_state_dict(
-            torch.load(config["model_path"], map_location=device))
-        print("Model loaded : {}".format(config["model_path"]))
+            torch.load(model_path, map_location=device))
+        print("Model loaded : {}".format(model_path))
         print("Start evaluation...")
         produce_evaluation_file(eval_loader, model, device,
                                 eval_score_path, eval_trial_path)
