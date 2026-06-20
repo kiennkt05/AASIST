@@ -59,17 +59,28 @@ def enable_full_determinism() -> None:
         pass
 
 
+def _to_byte_tensor(x: Any) -> torch.ByteTensor:
+    """Normalize RNG payloads to a CPU ByteTensor."""
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().to(torch.uint8)
+    if isinstance(x, np.ndarray):
+        return torch.from_numpy(x.astype(np.uint8, copy=False))
+    if isinstance(x, list):
+        return torch.tensor(x, dtype=torch.uint8)
+    raise TypeError(f"Unsupported RNG state type: {type(x)}")
+
+
 def capture_rng_state(train_generator: Optional[torch.Generator] = None) -> Dict[str, Any]:
     """Capture all RNG states needed for epoch-boundary resume."""
     state: Dict[str, Any] = {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
-        "torch_cpu": torch.get_rng_state(),
+        "torch_cpu": torch.get_rng_state().cpu(),
     }
     if torch.cuda.is_available():
-        state["torch_cuda_all"] = torch.cuda.get_rng_state_all()
+        state["torch_cuda_all"] = [s.cpu() for s in torch.cuda.get_rng_state_all()]
     if train_generator is not None:
-        state["train_generator"] = train_generator.get_state()
+        state["train_generator"] = train_generator.get_state().cpu()
     return state
 
 
@@ -78,11 +89,11 @@ def restore_rng_state(state: Dict[str, Any],
     """Restore all RNG states saved by capture_rng_state()."""
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
-    torch.set_rng_state(state["torch_cpu"])
+    torch.set_rng_state(_to_byte_tensor(state["torch_cpu"]))
     if torch.cuda.is_available() and "torch_cuda_all" in state:
-        torch.cuda.set_rng_state_all(state["torch_cuda_all"])
+        torch.cuda.set_rng_state_all([_to_byte_tensor(s) for s in state["torch_cuda_all"]])
     if train_generator is not None and "train_generator" in state:
-        train_generator.set_state(state["train_generator"])
+        train_generator.set_state(_to_byte_tensor(state["train_generator"]))
 
 
 def move_optimizer_state_to_device(optimizer: torch.optim.Optimizer,
@@ -228,7 +239,7 @@ def main(args: argparse.Namespace) -> None:
     if args.resume is not None:
         if os.path.exists(args.resume):
             print("Loading checkpoint from {}...".format(args.resume))
-            checkpoint = torch_load_compat(args.resume, map_location=device)
+            checkpoint = torch_load_compat(args.resume, map_location="cpu")
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 model.load_state_dict(checkpoint["model_state_dict"])
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
