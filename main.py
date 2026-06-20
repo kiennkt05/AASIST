@@ -207,7 +207,7 @@ def main(args: argparse.Namespace) -> None:
     spcen_params = []
     base_params = []
     for n, p in model.named_parameters():
-        if 'leaf_spcen' in n:
+        if 'spcen' in n:
             spcen_params.append(p)
         else:
             base_params.append(p)
@@ -295,17 +295,6 @@ def main(args: argparse.Namespace) -> None:
         writer.add_scalar("loss", running_loss, epoch)
         writer.add_scalar("dev_eer", dev_eer, epoch)
         writer.add_scalar("dev_tdcf", dev_tdcf, epoch)
-
-        if epoch == 0:
-            if hasattr(model, "frontend") and hasattr(model.frontend, "use_gabor") and model.frontend.use_gabor:
-                print("\n--- Epoch 0: Gabor Filter Sanity Checks ---")
-                print("leaf_gabor.bandwidths:", model.frontend.filterbank.bandwidths.data)
-                print("leaf_gabor.center_freqs:", model.frontend.filterbank.center_freqs.data)
-                print("-----------------------------\n")
-            if hasattr(model, "frontend") and hasattr(model.frontend, "use_spcen") and model.frontend.use_spcen:
-                print("\n--- Epoch 0: S-PCEN Sanity Checks ---")
-                print("leaf_spcen.s:", model.frontend.spcen.s.data)
-                print("-----------------------------\n")
 
         best_dev_tdcf = min(dev_tdcf, best_dev_tdcf)
         if best_dev_eer >= dev_eer:
