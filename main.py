@@ -207,7 +207,7 @@ def main(args: argparse.Namespace) -> None:
     spcen_params = []
     base_params = []
     for n, p in model.named_parameters():
-        if 'leaf_spcen' in n:
+        if 'spcen' in n:
             spcen_params.append(p)
         else:
             base_params.append(p)
