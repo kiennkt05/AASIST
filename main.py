@@ -174,6 +174,19 @@ def main(args: argparse.Namespace) -> None:
     # define model architecture
     model = get_model(model_config, device)
 
+    # Optionally initialize model weights from a pretrained checkpoint.
+    if args.init_model is not None:
+        if os.path.exists(args.init_model):
+            print("Initializing model weights from: {}".format(args.init_model))
+            init_ckpt = torch_load_compat(args.init_model, map_location=device)
+            if isinstance(init_ckpt, dict) and "model_state_dict" in init_ckpt:
+                model.load_state_dict(init_ckpt["model_state_dict"])
+            else:
+                model.load_state_dict(init_ckpt)
+            print("Model weights loaded.")
+        else:
+            print("WARNING: --init_model path '{}' does not exist. Training from scratch.".format(args.init_model))
+
     # Persistent generator for train DataLoader shuffle state.
     train_generator = torch.Generator()
     train_generator.manual_seed(args.seed)
@@ -565,4 +578,8 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="path to checkpoint to resume training from")
+    parser.add_argument("--init_model",
+                        type=str,
+                        default=None,
+                        help="path to a pretrained model checkpoint to initialize")
     main(parser.parse_args())
