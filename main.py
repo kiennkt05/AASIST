@@ -128,8 +128,7 @@ def main(args: argparse.Namespace) -> None:
     model_config = config["model_config"]
     optim_config = config["optim_config"]
     optim_config["epochs"] = config["num_epochs"]
-    track = config["track"]
-    assert track in ["LA", "PA", "DF"], "Invalid track given"
+
     if "eval_all_best" not in config:
         config["eval_all_best"] = "True"
     if "freq_aug" not in config:
@@ -141,19 +140,12 @@ def main(args: argparse.Namespace) -> None:
 
     # define database related paths
     output_dir = Path(args.output_dir)
-    prefix_2019 = "ASVspoof2019.{}".format(track)
-    database_path = Path(config["database_path"])
-    dev_trial_path = (database_path /
-                      "ASVspoof2019_{}_cm_protocols/{}.cm.dev.trl.txt".format(
-                          track, prefix_2019))
-    eval_trial_path = (
-        database_path /
-        "ASVspoof2019_{}_cm_protocols/{}.cm.eval.trl.txt".format(
-            track, prefix_2019))
+
+    dev_trial_path = config['dev_trial_path']
+    eval_trial_path = config['eval_trial_path']
 
     # define model related paths
-    model_tag = "{}_{}_ep{}_bs{}".format(
-        track,
+    model_tag = "LA_{}_ep{}_bs{}".format(
         os.path.splitext(os.path.basename(args.config))[0],
         config["num_epochs"], config["batch_size"])
     if args.comment:
@@ -193,7 +185,7 @@ def main(args: argparse.Namespace) -> None:
 
     # Define dataloaders.
     trn_loader, dev_loader, eval_loader = get_loader(
-        database_path, args.seed, config, train_generator
+        args.seed, config, train_generator
     )
 
     # evaluates pretrained model and exit script
@@ -205,13 +197,12 @@ def main(args: argparse.Namespace) -> None:
         produce_evaluation_file(eval_loader, model, device,
                                 eval_score_path, eval_trial_path)
         calculate_tDCF_EER(cm_scores_file=eval_score_path,
-                           asv_score_file=database_path /
-                           config["asv_score_path"],
+                           asv_score_file=config["asv_score_path"],
                            output_file=model_tag / "t-DCF_EER.txt")
         print("DONE.")
         eval_eer, eval_tdcf = calculate_tDCF_EER(
             cm_scores_file=eval_score_path,
-            asv_score_file=database_path / config["asv_score_path"],
+            asv_score_file=config["asv_score_path"],
             output_file=model_tag/"loaded_model_t-DCF_EER.txt")
         sys.exit(0)
 
@@ -299,7 +290,7 @@ def main(args: argparse.Namespace) -> None:
                                 metric_path/"dev_score.txt", dev_trial_path)
         dev_eer, dev_tdcf = calculate_tDCF_EER(
             cm_scores_file=metric_path/"dev_score.txt",
-            asv_score_file=database_path/config["asv_score_path"],
+            asv_score_file=config["asv_score_path"],
             output_file=metric_path/"dev_t-DCF_EER_{}epo.txt".format(epoch),
             printout=False)
 
@@ -322,7 +313,7 @@ def main(args: argparse.Namespace) -> None:
                                         eval_score_path, eval_trial_path)
                 eval_eer, eval_tdcf = calculate_tDCF_EER(
                     cm_scores_file=eval_score_path,
-                    asv_score_file=database_path / config["asv_score_path"],
+                    asv_score_file=config["asv_score_path"],
                     output_file=metric_path /
                     "t-DCF_EER_{:03d}epo.txt".format(epoch))
 
@@ -371,8 +362,7 @@ def main(args: argparse.Namespace) -> None:
     produce_evaluation_file(eval_loader, model, device, eval_score_path,
                             eval_trial_path)
     eval_eer, eval_tdcf = calculate_tDCF_EER(cm_scores_file=eval_score_path,
-                                             asv_score_file=database_path /
-                                             config["asv_score_path"],
+                                             asv_score_file=config["asv_score_path"],
                                              output_file=model_tag / "t-DCF_EER.txt")
 
     f_log.write("=" * 5 + "\n")
@@ -406,28 +396,20 @@ def get_model(model_config: Dict, device: torch.device):
     return model
 
 
-def get_loader(database_path: str,
-               seed: int,
+def get_loader(seed: int,
                config: dict,
                train_generator: torch.Generator) -> List[torch.utils.data.DataLoader]:
     """Make PyTorch DataLoaders for train / development / evaluation."""
     track = config["track"]
     prefix_2019 = "ASVspoof2019.{}".format(track)
 
-    trn_database_path = database_path / f"ASVspoof2019_{track}_train/"
-    dev_database_path = database_path / f"ASVspoof2019_{track}_dev/"
-    eval_database_path = database_path / f"ASVspoof2019_{track}_eval/"
+    trn_database_path = config["trn_database_path"]
+    dev_database_path = config["dev_database_path"]
+    eval_database_path = config["eval_database_path"]
 
-    trn_list_path = (database_path /
-                     "ASVspoof2019_{}_cm_protocols/{}.cm.train.trn.txt".format(
-                         track, prefix_2019))
-    dev_trial_path = (database_path /
-                      "ASVspoof2019_{}_cm_protocols/{}.cm.dev.trl.txt".format(
-                          track, prefix_2019))
-    eval_trial_path = (
-        database_path /
-        f"ASVspoof2019_{track}_cm_protocols/{prefix_2019}.cm.eval.trl.txt"
-    )
+    trn_list_path = config["trn_list_path"]
+    dev_trial_path = config["dev_trial_path"]
+    eval_trial_path = config["eval_trial_path"]
 
     d_label_trn, file_train = genSpoof_list(dir_meta=trn_list_path,
                                             is_train=True,
