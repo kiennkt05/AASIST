@@ -1,6 +1,7 @@
 import numpy as np
 import soundfile as sf
 import torch
+from pathlib import Path
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -69,7 +70,7 @@ class Dataset_ASVspoof2019_train(Dataset):
            self.labels      : dictionary (key: utt key, value: label integer)"""
         self.list_IDs = list_IDs
         self.labels = labels
-        self.base_dir = base_dir
+        self.base_dir = Path(base_dir)
         self.algo = algo if algo is not None else {"is_vsasv": False}
         self.cut = 64600  # take ~4 sec audio (64600 samples)
 
@@ -95,7 +96,7 @@ class Dataset_ASVspoof2019_devNeval(Dataset):
         """self.list_IDs	: list of strings (each string: utt key),
         """
         self.list_IDs = list_IDs
-        self.base_dir = base_dir
+        self.base_dir = Path(base_dir)
         self.algo = algo if algo is not None else {"is_vsasv": False}
         self.cut = 64600  # take ~4 sec audio (64600 samples)
 
