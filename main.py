@@ -468,7 +468,7 @@ def produce_evaluation_file(
     """Perform evaluation and save the score to a file"""
     model.eval()
     with open(trial_path, "r") as f_trl:
-        trial_lines = f_trl.readlines()
+        trial_lines = [line for line in f_trl.readlines() if line.strip()]
     fname_list = []
     score_list = []
     for batch_x, utt_id in tqdm(data_loader, desc="Evaluating"):
@@ -480,6 +480,8 @@ def produce_evaluation_file(
         fname_list.extend(utt_id)
         score_list.extend(batch_score.tolist())
 
+    if not (len(trial_lines) == len(fname_list) == len(score_list)):
+        print(f"DEBUG: len(trial_lines)={len(trial_lines)}, len(fname_list)={len(fname_list)}, len(score_list)={len(score_list)}")
     assert len(trial_lines) == len(fname_list) == len(score_list)
     with open(save_path, "w") as fh:
         for fn, sco, trl in zip(fname_list, score_list, trial_lines):

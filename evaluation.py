@@ -53,7 +53,7 @@ def calculate_tDCF_EER(cm_scores_file,
 
     eer_cm = compute_eer(bona_cm, spoof_cm)[0]
 
-    attack_types = [f'A{_id:02d}' for _id in range(7, 20)]
+    attack_types = sorted(list(np.unique(cm_sources[cm_keys == 'spoof'])))
     if printout:
         spoof_cm_breakdown = {
             attack_type: cm_scores[cm_sources == attack_type]

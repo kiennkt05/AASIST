@@ -15,7 +15,7 @@ def genSpoof_list(dir_meta, is_train=False, is_eval=False):
     file_list = []
     track_info = {}
     with open(dir_meta, "r") as f:
-        l_meta = f.readlines()
+        l_meta = [line for line in f.readlines() if line.strip()]
 
     if is_train:
         for line in l_meta:
