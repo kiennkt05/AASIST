@@ -411,14 +411,15 @@ def get_loader(seed: int,
     dev_trial_path = config["dev_trial_path"]
     eval_trial_path = config["eval_trial_path"]
 
-    d_label_trn, file_train = genSpoof_list(dir_meta=trn_list_path,
-                                            is_train=True,
-                                            is_eval=False)
+    d_label_trn, file_train, track_info_trn = genSpoof_list(dir_meta=trn_list_path,
+                                                            is_train=True,
+                                                            is_eval=False)
     print("no. training files:", len(file_train))
 
     train_set = Dataset_ASVspoof2019_train(list_IDs=file_train,
                                            labels=d_label_trn,
-                                           base_dir=trn_database_path)
+                                           base_dir=trn_database_path,
+                                           algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_trn})
     trn_loader = DataLoader(
         train_set,
         batch_size=config["batch_size"],
@@ -429,24 +430,26 @@ def get_loader(seed: int,
         generator=train_generator,
     )
 
-    _, file_dev = genSpoof_list(dir_meta=dev_trial_path,
-                                is_train=False,
-                                is_eval=False)
+    _, file_dev, track_info_dev = genSpoof_list(dir_meta=dev_trial_path,
+                                                is_train=False,
+                                                is_eval=False)
     print("no. validation files:", len(file_dev))
 
     dev_set = Dataset_ASVspoof2019_devNeval(list_IDs=file_dev,
-                                            base_dir=dev_database_path)
+                                            base_dir=dev_database_path,
+                                            algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_dev})
     dev_loader = DataLoader(dev_set,
                             batch_size=config["batch_size"],
                             shuffle=False,
                             drop_last=False,
                             pin_memory=True)
 
-    file_eval = genSpoof_list(dir_meta=eval_trial_path,
-                              is_train=False,
-                              is_eval=True)
+    file_eval, track_info_eval = genSpoof_list(dir_meta=eval_trial_path,
+                                               is_train=False,
+                                               is_eval=True)
     eval_set = Dataset_ASVspoof2019_devNeval(list_IDs=file_eval,
-                                             base_dir=eval_database_path)
+                                             base_dir=eval_database_path,
+                                             algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_eval})
     eval_loader = DataLoader(eval_set,
                              batch_size=config["batch_size"],
                              shuffle=False,
