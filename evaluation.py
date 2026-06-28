@@ -51,7 +51,7 @@ def calculate_tDCF_EER(cm_scores_file,
     bona_cm = cm_scores[cm_keys == 'bonafide']
     spoof_cm = cm_scores[cm_keys == 'spoof']
 
-    eer_cm = compute_eer(bona_cm, spoof_cm)[0]
+    eer_cm, threshold_cm = compute_eer(bona_cm, spoof_cm)
 
     attack_types = sorted(list(np.unique(cm_sources[cm_keys == 'spoof'])))
     if printout:
@@ -101,6 +101,7 @@ def calculate_tDCF_EER(cm_scores_file,
             f_res.write('\tEER\t\t= {:8.9f} % '
                         '(Equal error rate for countermeasure)\n'.format(
                             eer_cm * 100))
+            f_res.write('\tThreshold\t= {:8.9f}\n'.format(threshold_cm))
 
             if asv_score_valid:
                 f_res.write('\nTANDEM\n')
@@ -114,7 +115,7 @@ def calculate_tDCF_EER(cm_scores_file,
                 )
         os.system(f"cat {output_file}")
 
-    return eer_cm * 100, min_tDCF
+    return eer_cm * 100, min_tDCF, threshold_cm
 
 
 def obtain_asv_error_rates(tar_asv, non_asv, spoof_asv, asv_threshold):
