@@ -81,7 +81,7 @@ class Dataset_ASVspoof2019_train(Dataset):
         key = self.list_IDs[index]
         if self.algo.get("is_vsasv", False):
             track_info = self.algo["track_info"][key]
-            file_path = self.base_dir / f"{track_info['attack_type']}/{track_info['attack_type']}/{track_info['speaker_id']}/{key}.wav"
+            file_path = self.base_dir / key
         else:
             file_path = self.base_dir / f"flac/{key}.flac"
         X, _ = sf.read(str(file_path))
