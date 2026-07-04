@@ -417,10 +417,19 @@ def get_loader(seed: int,
                                                             is_eval=False)
     print("no. training files:", len(file_train))
 
-    train_set = Dataset_ASVspoof2019_train(list_IDs=file_train,
-                                           labels=d_label_trn,
-                                           base_dir=trn_database_path,
-                                           algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_trn})
+    train_set = Dataset_ASVspoof2019_train(
+        list_IDs=file_train,
+        labels=d_label_trn,
+        base_dir=trn_database_path,
+        algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_trn},
+        musan_dir=config.get("musan_dir"),
+        musan_index_json=config.get("musan_index_json"),
+        musan_prob=config.get("musan_prob", 0.0),
+        musan_category_weights=config.get("musan_category_weights"),
+        musan_snr_ranges=config.get("musan_snr_ranges"),
+        speech_num_clips_range=config.get("speech_num_clips_range", (3, 7)),
+        musan_seed=seed
+    )
     trn_loader = DataLoader(
         train_set,
         batch_size=config["batch_size"],

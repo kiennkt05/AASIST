@@ -139,6 +139,13 @@ def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+    
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is not None:
+        dataset = worker_info.dataset
+        if getattr(dataset, "musan_augmentor", None) is not None:
+            dataset.musan_augmentor.rng = random.Random(worker_seed)
+            dataset.musan_augmentor.np_rng = np.random.RandomState(worker_seed)
 
 
 def set_seed(seed, config = None):

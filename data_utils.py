@@ -65,7 +65,10 @@ def pad_random(x: np.ndarray, max_len: int = 64600):
 
 
 class Dataset_ASVspoof2019_train(Dataset):
-    def __init__(self, list_IDs, labels, base_dir, algo=None):
+    def __init__(self, list_IDs, labels, base_dir, algo=None,
+                 musan_dir=None, musan_index_json=None, musan_prob=0.0,
+                 musan_category_weights=None, musan_snr_ranges=None,
+                 speech_num_clips_range=(3, 7), musan_seed=None):
         """self.list_IDs	: list of strings (each string: utt key),
            self.labels      : dictionary (key: utt key, value: label integer)"""
         self.list_IDs = list_IDs
@@ -73,6 +76,32 @@ class Dataset_ASVspoof2019_train(Dataset):
         self.base_dir = Path(base_dir)
         self.algo = algo if algo is not None else {"is_vsasv": False}
         self.cut = 64600  # take ~4 sec audio (64600 samples)
+        
+        self.musan_prob = musan_prob
+        self.musan_augmentor = None
+        if musan_prob > 0:
+            if musan_index_json is None:
+                raise ValueError("musan_prob > 0 but musan_index_json was not provided.")
+            
+            if not Path(musan_index_json).exists():
+                if musan_dir is None:
+                    raise ValueError(f"musan_index_json '{musan_index_json}' does not exist and musan_dir was not provided to build it.")
+                
+                import torch.distributed as dist
+                if not dist.is_initialized() or dist.get_rank() == 0:
+                    from musan_index import build_musan_index
+                    build_musan_index(musan_dir, musan_index_json)
+                if dist.is_initialized():
+                    dist.barrier()
+                
+            from musan_augment import MusanNoiseAugmentor
+            self.musan_augmentor = MusanNoiseAugmentor(
+                index_json=musan_index_json,
+                snr_ranges=musan_snr_ranges,
+                category_weights=musan_category_weights,
+                speech_num_clips_range=speech_num_clips_range,
+                seed=musan_seed
+            )
 
     def __len__(self):
         return len(self.list_IDs)
@@ -85,7 +114,11 @@ class Dataset_ASVspoof2019_train(Dataset):
             file_path = self.base_dir / f"flac/{key}.flac"
         X, _ = sf.read(str(file_path))
         X_pad = pad_random(X, self.cut)
-        x_inp = Tensor(X_pad)
+        
+        if self.musan_augmentor is not None and np.random.rand() < self.musan_prob:
+            X_pad = self.musan_augmentor.apply(X_pad.astype(np.float32))
+
+        x_inp = Tensor(X_pad.astype(np.float32))
         y = self.labels[key]
         return x_inp, y
 
