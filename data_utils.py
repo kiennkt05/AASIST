@@ -1,5 +1,6 @@
 import numpy as np
 import soundfile as sf
+import random
 import torch
 from pathlib import Path
 from torch import Tensor
@@ -68,7 +69,8 @@ class Dataset_ASVspoof2019_train(Dataset):
     def __init__(self, list_IDs, labels, base_dir, algo=None,
                  musan_dir=None, musan_index_json=None, musan_prob=0.0,
                  musan_category_weights=None, musan_snr_ranges=None,
-                 speech_num_clips_range=(3, 7), musan_seed=None):
+                 speech_num_clips_range=(3, 7), musan_seed=None,
+                 musan_correlation_track_rate=0.02):
         """self.list_IDs	: list of strings (each string: utt key),
            self.labels      : dictionary (key: utt key, value: label integer)"""
         self.list_IDs = list_IDs
@@ -76,24 +78,29 @@ class Dataset_ASVspoof2019_train(Dataset):
         self.base_dir = Path(base_dir)
         self.algo = algo if algo is not None else {"is_vsasv": False}
         self.cut = 64600  # take ~4 sec audio (64600 samples)
-        
+
         self.musan_prob = musan_prob
         self.musan_augmentor = None
+        # fraction of augmented samples for which HF structural correlation
+        # is additionally computed and tracked (adds FFT overhead per call,
+        # so only sampled on a subset rather than every augmented sample)
+        self.musan_correlation_track_rate = musan_correlation_track_rate
+
         if musan_prob > 0:
             if musan_index_json is None:
                 raise ValueError("musan_prob > 0 but musan_index_json was not provided.")
-            
+
             if not Path(musan_index_json).exists():
                 if musan_dir is None:
                     raise ValueError(f"musan_index_json '{musan_index_json}' does not exist and musan_dir was not provided to build it.")
-                
+
                 import torch.distributed as dist
                 if not dist.is_initialized() or dist.get_rank() == 0:
                     from musan_index import build_musan_index
                     build_musan_index(musan_dir, musan_index_json)
                 if dist.is_initialized():
                     dist.barrier()
-                
+
             from musan_augment import MusanNoiseAugmentor
             self.musan_augmentor = MusanNoiseAugmentor(
                 index_json=musan_index_json,
@@ -114,9 +121,12 @@ class Dataset_ASVspoof2019_train(Dataset):
             file_path = self.base_dir / f"flac/{key}.flac"
         X, _ = sf.read(str(file_path))
         X_pad = pad_random(X, self.cut)
-        
+
         if self.musan_augmentor is not None and np.random.rand() < self.musan_prob:
-            X_pad = self.musan_augmentor.apply(X_pad.astype(np.float32))
+            track_corr = np.random.rand() < self.musan_correlation_track_rate
+            X_pad = self.musan_augmentor.apply(
+                X_pad.astype(np.float32), track_correlation=track_corr
+            )
 
         x_inp = Tensor(X_pad.astype(np.float32))
         y = self.labels[key]

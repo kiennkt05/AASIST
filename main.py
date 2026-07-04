@@ -297,6 +297,13 @@ def main(args: argparse.Namespace) -> None:
 
         print("DONE.\nLoss:{:.5f}, dev_eer: {:.3f}, dev_tdcf:{:.5f}, dev_threshold:{:.5f}".format(
             running_loss, dev_eer, dev_tdcf, dev_threshold))
+        
+        if getattr(trn_loader.dataset, "musan_augmentor", None) is not None:
+            aug = trn_loader.dataset.musan_augmentor
+            print(f"[epoch {epoch}] musan cap_trigger_rate={aug.cap_trigger_rate:.4f}  "
+                  f"low_correlation_rate={aug.low_correlation_rate:.4f} "
+                  f"(n_checked={aug._n_correlation_checked})")
+
         writer.add_scalar("loss", running_loss, epoch)
         writer.add_scalar("dev_eer", dev_eer, epoch)
         writer.add_scalar("dev_tdcf", dev_tdcf, epoch)

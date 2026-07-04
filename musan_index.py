@@ -1,11 +1,12 @@
 """
-Build the MUSAN clip index, filtering out clips whose raw average power
-is too low relative to the rest of their category. Low-power clips force
-very large `scale` values during SNR mixing (scale = sqrt(sig_power /
-(noise_power * snr_linear))), which causes destructive clipping and
-corrupts the achieved SNR -- confirmed empirically to be the actual
-root cause, NOT crest factor (peak/RMS), which was tested and rejected
-as a filtering criterion.
+Build the MUSAN clip index. Does NOT exclude files based on whole-file
+average power -- that was tested and found ineffective, since runtime
+mixing uses a random 4-second CROP of each file, not the whole file, and
+a file's average power doesn't predict a given crop's power (a file can
+be loud on average but contain long near-silent stretches a crop can land
+in). Instead, per-category power thresholds are computed and stored in
+the index's `_meta` field, for use as a CROP-level rejection-sampling
+threshold at runtime inside MusanNoiseAugmentor._load_random_clip.
 """
 
 import json
@@ -26,14 +27,13 @@ def build_musan_index(
     out_json: str = "musan_index.json",
     min_power_percentile: float = 10.0,
 ):
-    """Build MUSAN index with per-category minimum-power filtering.
-
-    Clips below the `min_power_percentile`-th percentile of average power
-    within their own category are excluded. Default (p10) keeps ~90% of
-    clips per category while eliminating the vast majority of pathological
-    scale-cap triggers seen during SNR mixing (empirically verified via
-    diagnose_musan_full.py: p10 dropped noise's cap-trigger rate from
-    5.0% -> 0.4%, and reduced worst-case deviation from tens of dB to ~1.5dB).
+    """Build MUSAN index. Keeps ALL clips (no file-level exclusion) but
+    computes a per-category min-power threshold (from whole-file averages,
+    as a reasonable proxy for setting the threshold) and stores it in
+    index['_meta']['min_power_thresholds']. MusanNoiseAugmentor uses this
+    threshold to reject-and-retry individual CROPS at runtime that fall
+    below it, which is the level at which power actually matters for
+    the SNR-mixing scale calculation.
     """
     musan_root = Path(musan_root)
     raw_entries = {"noise": [], "music": [], "speech": []}
@@ -50,22 +50,21 @@ def build_musan_index(
             })
 
     index = {}
+    thresholds = {}
     for category, entries in raw_entries.items():
         powers = np.array([e["power"] for e in entries])
-        threshold = np.percentile(powers, min_power_percentile)
+        threshold = float(np.percentile(powers, min_power_percentile))
+        thresholds[category] = threshold
 
-        kept = [e for e in entries if e["power"] >= threshold]
-        n_excluded = len(entries) - len(kept)
-
-        # strip the diagnostic 'power' field before saving -- not needed at
-        # runtime by MusanNoiseAugmentor, keeps the index file lean
-        for e in kept:
+        for e in entries:
             del e["power"]
 
-        index[category] = kept
-        print(f"{category}: kept {len(kept)}/{len(entries)}  "
-              f"(excluded {n_excluded} below p{min_power_percentile} "
-              f"power threshold={threshold:.6f})")
+        index[category] = entries
+        print(f"{category}: {len(entries)} files indexed "
+              f"(min_power_threshold=p{min_power_percentile}={threshold:.6f}, "
+              f"applied at CROP level, not file-exclusion level)")
+
+    index["_meta"] = {"min_power_thresholds": thresholds}
 
     with open(out_json, "w") as f:
         json.dump(index, f)

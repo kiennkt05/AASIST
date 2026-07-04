@@ -43,7 +43,7 @@ Ensure your training configuration file defines the following settings to activa
   "musan_index_json": "musan_index.json",
   "musan_prob": 0.5,
   "musan_category_weights": {"noise": 0.5, "music": 0.25, "speech": 0.25},
-  "musan_snr_ranges": {"noise": [0, 15], "music": [5, 15], "speech": [13, 20]},
+  "musan_snr_ranges": {"noise": [3, 15], "music": [5, 15], "speech": [13, 20]},
   "speech_num_clips_range": [3, 7]
 }
 ```
