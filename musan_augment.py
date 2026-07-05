@@ -62,6 +62,14 @@ class MusanNoiseAugmentor:
         assert set(self.category_weights.keys()) <= set(self.snr_ranges.keys()), \
             "musan_category_weights keys must be a subset of musan_snr_ranges keys"
 
+    def reset_epoch_counters(self):
+        """Call at the start of each epoch to get per-epoch (not cumulative)
+        rates from cap_trigger_rate / low_correlation_rate."""
+        self._n_capped = 0
+        self._n_total = 0
+        self._n_low_correlation = 0
+        self._n_correlation_checked = 0
+
     def _load_random_clip(self, category: str, min_len: int,
                            min_power: float = None) -> np.ndarray:
         """Load a random clip from `category`, tiling/cropping to at least

@@ -283,6 +283,9 @@ def main(args: argparse.Namespace) -> None:
 
     # Training loop.
     for epoch in range(start_epoch, config["num_epochs"]):
+        if getattr(trn_loader.dataset, "musan_augmentor", None) is not None:
+            trn_loader.dataset.musan_augmentor.reset_epoch_counters()
+
         print("Start training epoch{:03d}".format(epoch))
         running_loss = train_epoch(trn_loader, model, optimizer, device,
                                    scheduler, config)
