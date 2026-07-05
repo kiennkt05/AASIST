@@ -329,11 +329,11 @@ def main(args: argparse.Namespace) -> None:
                 if eval_eer < best_eval_eer:
                     log_text += "best eer, {:.4f}%, ".format(eval_eer)
                     best_eval_eer = eval_eer
+                    torch.save(model.state_dict(),
+                               model_save_path / "best.pth")
                 if eval_tdcf < best_eval_tdcf:
                     log_text += "best tdcf, {:.4f}".format(eval_tdcf)
                     best_eval_tdcf = eval_tdcf
-                    torch.save(model.state_dict(),
-                               model_save_path / "best.pth")
                 if len(log_text) > 0:
                     print(log_text)
                     f_log.write(log_text + "\n")
