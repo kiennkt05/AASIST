@@ -361,29 +361,29 @@ def main(args: argparse.Namespace) -> None:
         }
         torch.save(checkpoint, model_save_path / "checkpoint_latest.pth")
 
-    # Final evaluation.
-    print("Start final evaluation")
-    if n_swa_update > 0:
-        optimizer_swa.swap_swa_sgd()
-        optimizer_swa.bn_update(trn_loader, model, device=device)
+    # # Final evaluation.
+    # print("Start final evaluation")
+    # if n_swa_update > 0:
+    #     optimizer_swa.swap_swa_sgd()
+    #     optimizer_swa.bn_update(trn_loader, model, device=device)
 
-    produce_evaluation_file(eval_loader, model, device, eval_score_path,
-                            eval_trial_path)
-    eval_eer, eval_tdcf, eval_threshold = calculate_tDCF_EER(cm_scores_file=eval_score_path,
-                                             asv_score_file=config["asv_score_path"],
-                                             output_file=model_tag / "t-DCF_EER.txt")
+    # produce_evaluation_file(eval_loader, model, device, eval_score_path,
+    #                         eval_trial_path)
+    # eval_eer, eval_tdcf, eval_threshold = calculate_tDCF_EER(cm_scores_file=eval_score_path,
+    #                                          asv_score_file=config["asv_score_path"],
+    #                                          output_file=model_tag / "t-DCF_EER.txt")
 
-    f_log.write("=" * 5 + "\n")
-    f_log.write("EER: {:.3f}, min t-DCF: {:.5f}, threshold: {:.5f}\n".format(eval_eer, eval_tdcf, eval_threshold))
-    f_log.close()
+    # f_log.write("=" * 5 + "\n")
+    # f_log.write("EER: {:.3f}, min t-DCF: {:.5f}, threshold: {:.5f}\n".format(eval_eer, eval_tdcf, eval_threshold))
+    # f_log.close()
 
-    torch.save(model.state_dict(), model_save_path / "swa.pth")
+    # torch.save(model.state_dict(), model_save_path / "swa.pth")
 
-    if eval_eer <= best_eval_eer:
-        best_eval_eer = eval_eer
-    if eval_tdcf <= best_eval_tdcf:
-        best_eval_tdcf = eval_tdcf
-        torch.save(model.state_dict(), model_save_path / "best.pth")
+    # if eval_eer <= best_eval_eer:
+    #     best_eval_eer = eval_eer
+    # if eval_tdcf <= best_eval_tdcf:
+    #     best_eval_tdcf = eval_tdcf
+    #     torch.save(model.state_dict(), model_save_path / "best.pth")
 
     print("Exp FIN. EER: {:.3f}, min t-DCF: {:.5f}".format(
         best_eval_eer, best_eval_tdcf))
