@@ -269,8 +269,7 @@ def get_eval_loader_with_labels(config, batch_size):
         list_IDs=file_eval,
         labels=d_label_eval,
         base_dir=eval_database_path,
-        algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_eval},
-        musan_prob=0.0
+        algo={"is_vsasv": config.get("dataset") == "VSASV", "track_info": track_info_eval}
     )
     
     eval_loader = DataLoader(
@@ -308,8 +307,7 @@ def main():
         list_IDs=file_train,
         labels=d_label_trn,
         base_dir=trn_database_path,
-        algo={"is_vsasv": analyzer.config.get("dataset") == "VSASV", "track_info": track_info_trn},
-        musan_prob=0.0 
+        algo={"is_vsasv": analyzer.config.get("dataset") == "VSASV", "track_info": track_info_trn}
     )
     
     trn_loader = DataLoader(
