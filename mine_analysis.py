@@ -185,6 +185,17 @@ class MINEAnalysis:
         
         self.opt_M = torch.optim.Adam(self.mine_M.parameters(), lr=1e-4)
         self.opt_Z = torch.optim.Adam(self.mine_Z.parameters(), lr=1e-4)
+        
+        self.start_epoch = 0
+        ckpt_path = "mine_latest_checkpoint.pth"
+        if os.path.exists(ckpt_path):
+            print(f"Resuming from {ckpt_path}")
+            ckpt = torch.load(ckpt_path, map_location=device)
+            self.mine_M.load_state_dict(ckpt["mine_M_state"])
+            self.mine_Z.load_state_dict(ckpt["mine_Z_state"])
+            self.opt_M.load_state_dict(ckpt["opt_M_state"])
+            self.opt_Z.load_state_dict(ckpt["opt_Z_state"])
+            self.start_epoch = ckpt.get("epoch", 0)
 
     def extract_features(self, x):
         """
@@ -211,7 +222,7 @@ class MINEAnalysis:
 
     def train(self, trn_loader, epochs=50):
         print("Starting MINE training...")
-        for epoch in range(epochs):
+        for epoch in range(self.start_epoch, epochs):
             loss_M_total = 0.0
             loss_Z_total = 0.0
             steps = 0
@@ -249,6 +260,16 @@ class MINEAnalysis:
                 })
                 
             print(f"Epoch {epoch+1} Avg MI_M: {-loss_M_total/steps:.4f} Avg MI_Z: {-loss_Z_total/steps:.4f}")
+            
+            # Save checkpoint at the end of each epoch
+            checkpoint = {
+                "epoch": epoch + 1,
+                "mine_M_state": self.mine_M.state_dict(),
+                "mine_Z_state": self.mine_Z.state_dict(),
+                "opt_M_state": self.opt_M.state_dict(),
+                "opt_Z_state": self.opt_Z.state_dict(),
+            }
+            torch.save(checkpoint, "mine_latest_checkpoint.pth")
 
 def get_eval_loader_with_labels(config, batch_size):
     eval_trial_path = config["eval_trial_path"]
