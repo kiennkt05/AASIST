@@ -308,7 +308,13 @@ def main():
     parser.add_argument("--weights", type=str, default="./exp_result/LA_AASIST_ep100_bs64/weights/best.pth", help="pretrained model weights")
     parser.add_argument("--batch_size", type=int, default=128, help="batch size for training")
     parser.add_argument("--epochs", type=int, default=50, help="number of epochs")
+    parser.add_argument("--seed", type=int, default=1234, help="random seed (0 for random)")
     args = parser.parse_args()
+    
+    if args.seed == 0:
+        import random
+        args.seed = random.randint(1, 1000000)
+        print(f"Random seed generated: {args.seed}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -316,8 +322,8 @@ def main():
     analyzer = MINEAnalysis(args.config, args.weights, device, args.batch_size)
     
     train_generator = torch.Generator()
-    train_generator.manual_seed(1234)
-    set_seed(1234, analyzer.config)
+    train_generator.manual_seed(args.seed)
+    set_seed(args.seed, analyzer.config)
     
     trn_list_path = analyzer.config["trn_list_path"]
     trn_database_path = analyzer.config["trn_database_path"]
