@@ -469,17 +469,18 @@ class Residual_block(nn.Module):
 
 
 class DynamicFrontend(nn.Module):
-    def __init__(self, filts, first_conv, use_gabor=True, use_spcen=True, use_sm=False):
+    def __init__(self, filts, first_conv, use_gabor=True, use_spcen=True, use_sm=False, use_fusion=True):
         super().__init__()
         self.use_gabor = use_gabor
         self.use_spcen = use_spcen
         self.use_sm = use_sm
+        self.use_fusion = use_fusion
         
         if use_gabor:
             self.filterbank = GaborConv1D(out_channels=filts, kernel_size=first_conv)
             spcen_channels = filts if use_sm else filts * 2
             
-            if not use_sm:
+            if not use_sm and self.use_fusion:
                 self.proj_real = nn.Parameter(torch.ones(1, filts, 1) * 0.5)
                 self.proj_imag = nn.Parameter(torch.ones(1, filts, 1) * 0.5)
         else:
@@ -508,8 +509,8 @@ class DynamicFrontend(nn.Module):
         # 3. Energy Normalization
         x = self.spcen(x)
         
-        # 4. Complex Fusion (Only if Gabor AND NOT Squared Modulus)
-        if self.use_gabor and not self.use_sm:
+        # 4. Complex Fusion (Only if Gabor AND NOT Squared Modulus AND use_fusion)
+        if self.use_gabor and not self.use_sm and self.use_fusion:
             x_real, x_imag = torch.chunk(x, 2, dim=1)
             x = (x_real * self.proj_real) + (x_imag * self.proj_imag)
         return x
@@ -528,13 +529,15 @@ class Model(nn.Module):
         use_gabor = str_to_bool(str(d_args.get("use_gabor", "True")))
         use_spcen = str_to_bool(str(d_args.get("use_spcen", "True")))
         use_sm = str_to_bool(str(d_args.get("use_sm", "False")))
+        use_fusion = str_to_bool(str(d_args.get("use_fusion", "True")))
 
         self.frontend = DynamicFrontend(
             filts=filts[0],
             first_conv=d_args["first_conv"],
             use_gabor=use_gabor,
             use_spcen=use_spcen,
-            use_sm=use_sm
+            use_sm=use_sm,
+            use_fusion=use_fusion
         )
 
         self.first_bn = nn.BatchNorm2d(num_features=1)
@@ -551,7 +554,8 @@ class Model(nn.Module):
             nn.Sequential(Residual_block(nb_filts=filts[4])),
             nn.Sequential(Residual_block(nb_filts=filts[4])))
 
-        self.pos_S = nn.Parameter(torch.randn(1, filts[0] // 3, filts[-1][-1]))
+        freq_dim = (filts[0] * 2) // 3 if (use_gabor and not use_sm and not use_fusion) else filts[0] // 3
+        self.pos_S = nn.Parameter(torch.randn(1, freq_dim, filts[-1][-1]))
         self.master1 = nn.Parameter(torch.randn(1, 1, gat_dims[0]))
         self.master2 = nn.Parameter(torch.randn(1, 1, gat_dims[0]))
 
